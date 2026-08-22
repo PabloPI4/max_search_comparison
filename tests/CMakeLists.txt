@@ -1,7 +1,10 @@
 add_executable(max_search_tests)
+
+set_source_files_properties(max_search_tests.cpp PROPERTIES LANGUAGE CUDA)
+
 target_sources(max_search_tests
     PRIVATE
-        max_search_tests.cu
+        max_search_tests.cpp
 )
 
 find_package(GTest REQUIRED)

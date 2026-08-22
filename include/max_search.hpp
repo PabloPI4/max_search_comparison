@@ -2,8 +2,14 @@
 
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
+#include <cuda/std/expected>
 
 namespace max_search {
+    enum class SearchError {
+        EmptyArray,
+        DeviceAllocationFailed
+    };
+
     /***********************************************************************//**
      * @brief Maximum number search in array using CUDA atomic max from host 
      *  array.
@@ -13,7 +19,7 @@ namespace max_search {
      * @return The maximum number of the array. 
      ***************************************************************************/
     template<typename T>
-    __host__ T atomic_max(const thrust::host_vector<T> &array);
+    __host__ cuda::std::expected<T, SearchError> atomic_max(const thrust::host_vector<T> &array);
     
     /***********************************************************************//**
      * @brief Maximum number search in array using CUDA atomic max from device
@@ -24,7 +30,7 @@ namespace max_search {
      * @return The maximum number of the array. 
      ***************************************************************************/
     template<typename T>
-    __host__ T atomic_max(const thrust::device_vector<T> &array);
+    __host__ cuda::std::expected<T, SearchError> atomic_max(const thrust::device_vector<T> &array);
 
 
     /***********************************************************************//**
@@ -40,7 +46,7 @@ namespace max_search {
      * @return The maximum number of the array.
      ***************************************************************************/
     template<typename T>
-    __host__ T reduction_max(const thrust::host_vector<T> &array, bool use_more_mem = false);
+    __host__ cuda::std::expected<T, SearchError> reduction_max(const thrust::host_vector<T> &array, bool use_more_mem = false);
 
     /***********************************************************************//**
      * @brief Maximum number search in array using reduction method with CUDA
@@ -55,7 +61,7 @@ namespace max_search {
      * @return The maximum number of the array.
      ***************************************************************************/
     template<typename T>
-    __host__ T reduction_max(const thrust::device_vector<T> &array, bool use_more_mem = false);
+    __host__ cuda::std::expected<T, SearchError> reduction_max(const thrust::device_vector<T> &array, bool use_more_mem = false);
 
     /***********************************************************************//**
      * @brief Maximum number search in array using reduction method with CUDA
@@ -70,5 +76,7 @@ namespace max_search {
      * @return The maximum number of the array.
      ***************************************************************************/
     template<typename T>
-    __host__ T reduction_max_modifiable(thrust::device_vector<T> &array, bool use_more_mem = false);
+    __host__ cuda::std::expected<T, SearchError> reduction_max_modifiable(thrust::device_vector<T> &array, bool use_more_mem = false);
 }
+
+#include "../src/max_search.tpp"
