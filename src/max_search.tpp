@@ -159,9 +159,20 @@ cuda::std::expected<T, max_search::SearchError> max_search::reduction_max_modifi
     }
 
     if (use_opt) {
-        thrust::device_vector<T> array_copy(array.size());
+        unsigned long long int size_array_copy;
+        unsigned long long int n_elements = array.size();
+        unsigned long long int n_elements_aux = n_elements/2;
+        if (n_elements % 2 != 0) {
+            n_elements_aux++;
+        }
+        size_array_copy = n_elements_aux/BLOCK_SIZE;
+        if (n_elements_aux % BLOCK_SIZE != 0) {
+            size_array_copy++;
+        }
 
-        T *raw_vector_copy = thrust::raw_pointer_cast(array.data());
+        thrust::device_vector<T> array_copy(size_array_copy);
+
+        T *raw_vector_copy = thrust::raw_pointer_cast(array_copy.data());
 
         /*
             Error checking.

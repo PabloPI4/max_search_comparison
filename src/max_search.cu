@@ -488,9 +488,8 @@ void execute_max_search_reduction(T *array, unsigned long long int size) {
 
 template<typename T>
 void execute_max_search_reduction_opt(T *array, T *array_copy, unsigned long long int size) {
-    T *array_in[1] = {array};
-    T *array_out[1] = {array_copy};
-    T *array_change_aux[1];
+    T *array_in = {array};
+    T *array_out = {array_copy};
     unsigned long long int offset = 1;
     unsigned long long int n_elements;
     unsigned long long int n_elements_aux;
@@ -513,11 +512,11 @@ void execute_max_search_reduction_opt(T *array, T *array_copy, unsigned long lon
     dim3 grid_size(n_blocks);
 
     do {
-        if (n_blocks == 1 && *array_in == array) {
+        if (n_blocks == 1 && array_in == array) {
             reduction_max_gpu<<<grid_size, block_size>>>(array, offset, n_elements_aux-1, n_elements);
         }
         else {
-            reduction_max_gpu_opt<<<grid_size, block_size>>>(*array_in, *array_out, offset, n_elements_aux-1, n_elements);
+            reduction_max_gpu_opt<<<grid_size, block_size>>>(array_in, array_out, offset, n_elements_aux-1, n_elements);
         }
 
         /*
@@ -542,9 +541,7 @@ void execute_max_search_reduction_opt(T *array, T *array_copy, unsigned long lon
 
         offset *= (BLOCK_SIZE*2);
 
-        *array_change_aux = *array_in;
-        *array_in = *array_out;
-        *array_out = *array_change_aux;
+        std::swap(array_in, array_out);
     } while(n_elements > 1);
 }
 

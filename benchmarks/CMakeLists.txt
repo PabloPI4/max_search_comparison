@@ -11,6 +11,7 @@ target_link_libraries(max_search_benchmarks
         max_search_lib
         benchmark::benchmark
         benchmark::benchmark_main
+        nvidia-ml
 )
 
 target_compile_options(max_search_benchmarks
