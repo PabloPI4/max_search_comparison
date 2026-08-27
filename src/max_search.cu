@@ -144,6 +144,7 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
     */
     int jump = 16;
     unsigned int mask = ~0;
+    int n_elements_active = 32;
     int last_thread_pos_warp = last_thread % 32;
 
     /*
@@ -151,8 +152,9 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
         have less than 32 threads.
     */
     if (index_thread >= last_thread - last_thread_pos_warp && last_thread_pos_warp != 31) {
-        jump = last_thread_pos_warp >> 1;
-        mask = (1 << (last_thread_pos_warp + 1)) - 1;
+        n_elements_active = last_thread_pos_warp + 1;
+        jump = n_elements_active >> 1;
+        mask = (1 << n_elements_active) - 1;
     }
 
     /*
@@ -179,6 +181,12 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
             }
 
             mask >>= jump;
+
+            if (n_elements_active % 2 == 1) {
+                jump++;
+            }
+
+            n_elements_active -= jump;
         }
 
         if (threadIdx.x % 32 == 0) {
@@ -192,12 +200,12 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
         Same warp level reduction but only for the first warp of each block
         with the local max elements calculated by each warp.
     */
-    int active_threads_in_block = (BLOCK_SIZE >> 5);
+    n_elements_active = (BLOCK_SIZE >> 5);
     if (BLOCK_SIZE % 32 != 0) {
-        active_threads_in_block++;
+        n_elements_active++;
     }
-    jump = BLOCK_SIZE >> 6;
-    mask = (1 << active_threads_in_block) - 1;
+    jump = n_elements_active >> 1;
+    mask = (1 << n_elements_active) - 1;
 
     /*
         Now the special preparation is executed by the first warp of the first
@@ -211,19 +219,19 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
             last_thread_pos_warp++;
         }
 
-        if (last_thread_pos_warp != active_threads_in_block) {
+        if (last_thread_pos_warp != n_elements_active) {
             jump = last_thread_pos_warp >> 1;
             mask = (1 << last_thread_pos_warp) - 1;
         }
 
-        active_threads_in_block = last_thread_pos_warp;
+        n_elements_active = last_thread_pos_warp;
     }
 
-    if (threadIdx.x < active_threads_in_block) {
+    if (threadIdx.x < n_elements_active) {
         maximum = temporal_storage[threadIdx.x];
     }
 
-    if (threadIdx.x > 31 || (blockIdx.x == gridDim.x - 1 && active_threads_in_block == 1)) {}
+    if (threadIdx.x > 31 || (blockIdx.x == gridDim.x - 1 && n_elements_active == 1)) {}
     else {
         for (; jump >= 1; jump >>= 1) {
             element = __shfl_down_sync(mask, maximum, jump);
@@ -233,6 +241,12 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
             }
 
             mask >>= jump;
+
+            if (n_elements_active % 2 == 1) {
+                jump++;
+            }
+
+            n_elements_active -= jump;
         }
     }
 
@@ -288,6 +302,7 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
     */
     int jump = 16;
     unsigned int mask = ~0;
+    int n_elements_active = 32;
     int last_thread_pos_warp = last_thread % 32;
 
     /*
@@ -295,8 +310,9 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
         have less than 32 threads.
     */
     if (index_thread >= last_thread - last_thread_pos_warp && last_thread_pos_warp != 31) {
-        mask = (1 << (last_thread_pos_warp + 1)) - 1;
-        jump = last_thread_pos_warp >> 1;
+        n_elements_active = last_thread_pos_warp + 1;
+        jump = n_elements_active >> 1;
+        mask = (1 << n_elements_active) - 1;
     }
 
     /*
@@ -323,6 +339,12 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
             }
 
             mask >>= jump;
+
+            if (n_elements_active % 2 == 1) {
+                jump++;
+            }
+            
+            n_elements_active -= jump;
         }
 
         if (threadIdx.x % 32 == 0) {
@@ -336,12 +358,12 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
         Same warp level reduction but only for the first warp of each block
         with the local max elements calculated by each warp.
     */
-    int active_threads_in_block = (BLOCK_SIZE >> 5);
+    n_elements_active = (BLOCK_SIZE >> 5);
     if (BLOCK_SIZE % 32 != 0) {
-        active_threads_in_block++;
+        n_elements_active++;
     }
     jump = BLOCK_SIZE >> 6;
-    mask = (1 << active_threads_in_block) - 1;
+    mask = (1 << n_elements_active) - 1;
 
     /*
         Now the special preparation is executed by the first warp of the first
@@ -355,19 +377,19 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
             last_thread_pos_warp++;
         }
 
-        if (last_thread_pos_warp != active_threads_in_block) {
+        if (last_thread_pos_warp != n_elements_active) {
             jump = last_thread_pos_warp >> 1;
             mask = (1 << last_thread_pos_warp) - 1;
         }
 
-        active_threads_in_block = last_thread_pos_warp;
+        n_elements_active = last_thread_pos_warp;
     }
 
-    if (threadIdx.x < active_threads_in_block) {
+    if (threadIdx.x < n_elements_active) {
         maximum = temporal_storage[threadIdx.x];
     }
 
-    if (threadIdx.x > 31 || (blockIdx.x == gridDim.x - 1 && active_threads_in_block == 1)) {}
+    if (threadIdx.x > 31 || (blockIdx.x == gridDim.x - 1 && n_elements_active == 1)) {}
     else {
         for (; jump >= 1; jump >>= 1) {
             element = __shfl_down_sync(mask, maximum, jump);
@@ -377,6 +399,12 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
             }
 
             mask >>= jump;
+
+            if (n_elements_active % 2 == 1) {
+                jump++;
+            }
+
+            n_elements_active -= jump;
         }
     }
 
