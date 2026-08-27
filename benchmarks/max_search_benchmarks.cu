@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <thrust/execution_policy.h>
 
 
 
@@ -146,6 +147,36 @@ void benchmark_max_search_reduction(benchmark::State& state) {
 
 
 
+template <typename T>
+void benchmark_max_search_thrust(benchmark::State& state) {
+    unsigned long long int size = state.range(0);
+    thrust::host_vector<T> array(size);
+
+    for (unsigned long long int i = 0; i < size; i++) {
+        array[i] = i;
+    }
+
+    VRAMTracker vram_tracker(0);
+    double baseline_vram_mb = vram_tracker.get_current_mb();
+    vram_tracker.start();
+
+    thrust::device_vector<T> array_gpu = array;
+
+    for (auto _ : state) {
+        auto maximum = thrust::reduce(thrust::device, array_gpu.begin(), array_gpu.end(), (T) 0, thrust::maximum<T>());
+
+        benchmark::DoNotOptimize(maximum);
+    }
+
+    double peak_vram_mb = vram_tracker.stop_and_get_max_mb();
+
+    state.SetItemsProcessed(state.iterations() * size);
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.counters["Memory_MB"] = std::max(0.0, peak_vram_mb - baseline_vram_mb);
+}
+
+
+
 
 
 BENCHMARK_TEMPLATE(benchmark_max_search_atomic, int)
@@ -252,6 +283,44 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, float, true)
 
 
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, double, true)
+    ->RangeMultiplier(10)->Range(1000, 100000000)
+    ->MinTime(0.5)
+    ->Repetitions(3)
+    ->DisplayAggregatesOnly(true)
+    ->Unit(benchmark::kMillisecond);
+
+
+
+
+
+BENCHMARK_TEMPLATE(benchmark_max_search_thrust, int)
+    ->RangeMultiplier(10)->Range(1000, 100000000)
+    ->MinTime(0.5)
+    ->Repetitions(3)
+    ->DisplayAggregatesOnly(true)
+    ->Unit(benchmark::kMillisecond);
+
+
+
+BENCHMARK_TEMPLATE(benchmark_max_search_thrust, long long int)
+    ->RangeMultiplier(10)->Range(1000, 100000000)
+    ->MinTime(0.5)
+    ->Repetitions(3)
+    ->DisplayAggregatesOnly(true)
+    ->Unit(benchmark::kMillisecond);
+
+
+
+BENCHMARK_TEMPLATE(benchmark_max_search_thrust, float)
+    ->RangeMultiplier(10)->Range(1000, 100000000)
+    ->MinTime(0.5)
+    ->Repetitions(3)
+    ->DisplayAggregatesOnly(true)
+    ->Unit(benchmark::kMillisecond);
+
+
+
+BENCHMARK_TEMPLATE(benchmark_max_search_thrust, double)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
     ->Repetitions(3)

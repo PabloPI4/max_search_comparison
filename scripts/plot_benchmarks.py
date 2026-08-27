@@ -1,316 +1,386 @@
 #!/usr/bin/env python3
+"""
+plot_benchmarks.py
+ 
+Generates a set of plots from a Google Benchmark JSON results file
+(as produced by --benchmark_format=json), comparing four max-search
+algorithm variants:
+ 
+    - Atomic          (benchmark_max_search_atomic<T>)
+    - Reduction        (benchmark_max_search_reduction<T, false>)
+    - Reduction_opt     (benchmark_max_search_reduction<T, true>)
+    - Thrust           (benchmark_max_search_thrust<T>)
+ 
+across four data types: int, long long int, float, double.
+ 
+Output layout (created under --output-dir):
+ 
+    <output-dir>/time/time_<dtype>.png
+    <output-dir>/memory_usage/memory_usage_<dtype>.png
+    <output-dir>/speedup/speedup_<dtype>.png
+    <output-dir>/bandwidth/bandwidth_<dtype>.png
+    <output-dir>/dashboard/dashboard_<dtype>.png
+ 
+Usage:
+    python3 plot_benchmarks.py --input benchmarks_results.json --output-dir results/
+"""
+ 
 import argparse
 import json
-import re
 import os
-import pandas as pd
+import re
+import sys
+from dataclasses import dataclass, field
+ 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-
-def parse_benchmark_name(name):
+ 
+ 
+# --------------------------------------------------------------------------
+# Configuration
+# --------------------------------------------------------------------------
+ 
+# Maps the C++ template base name used in the benchmark name to the
+# human-readable algorithm label requested by the user.
+ALGO_BASE_TO_LABEL = {
+    "benchmark_max_search_atomic": "Atomic",
+    # "reduction" is split further below depending on the boolean flag
+    "benchmark_max_search_thrust": "Thrust",
+}
+ 
+# Consistent draw order and colors across every plot.
+ALGO_ORDER = ["Atomic", "Reduction", "Reduction_opt", "Thrust"]
+ALGO_COLORS = {
+    "Atomic": "#d62728",        # red
+    "Reduction": "#1f77b4",     # blue
+    "Reduction_opt": "#2ca02c", # green
+    "Thrust": "#9467bd",        # purple
+}
+ 
+# Data types we expect to find, in the order we want plots generated.
+# Maps the C++ type spelling (as it appears in the JSON) to a
+# filesystem-safe key and a display label.
+DTYPES = [
+    ("int", "int", "int"),
+    ("long long int", "long_long_int", "long long int"),
+    ("float", "float", "float"),
+    ("double", "double", "double"),
+]
+ 
+# Size in bytes of each data type, used for the bandwidth computation.
+DTYPE_SIZE_BYTES = {
+    "int": 4,
+    "long long int": 8,
+    "float": 4,
+    "double": 8,
+}
+ 
+# Conversion factors from Google Benchmark's time_unit to seconds.
+TIME_UNIT_TO_SECONDS = {
+    "ns": 1e-9,
+    "us": 1e-6,
+    "ms": 1e-3,
+    "s": 1.0,
+}
+ 
+# Regex to parse a benchmark name, e.g.:
+#   benchmark_max_search_reduction<float, true>/1000000/min_time:0.500/repeats:3_mean
+BENCHMARK_NAME_RE = re.compile(
+    r"^benchmark_max_search_(?P<algo>\w+)<(?P<template_args>[^>]+)>/"
+    r"(?P<size>\d+)/.*_(?P<agg>mean|stddev)$"
+)
+ 
+ 
+# --------------------------------------------------------------------------
+# Data structures
+# --------------------------------------------------------------------------
+ 
+@dataclass
+class AlgoSeries:
+    sizes: list = field(default_factory=list)
+    mean_time_s: list = field(default_factory=list)
+    stddev_time_s: list = field(default_factory=list)
+    memory_mb: list = field(default_factory=list)
+ 
+ 
+# --------------------------------------------------------------------------
+# Parsing
+# --------------------------------------------------------------------------
+ 
+def classify_benchmark(name):
     """
-    Parsea los nombres generados por BENCHMARK_TEMPLATE:
-    - benchmark_max_search_atomic<type>/size_stat
-    - benchmark_max_search_reduction<type, false>/size_stat
-    - benchmark_max_search_reduction<type, true>/size_stat
+    Parses a benchmark name and returns (algo_label, dtype, size_elements)
+    or None if the entry does not correspond to a mean/stddev aggregate of
+    one of the four known algorithms.
     """
-    pattern = r"benchmark_max_search_([a-z]+)(?:<([^,>]+)(?:,\s*(true|false))?>)?/(\d+).*(mean|stddev)$"
-    match = re.search(pattern, str(name))
-    if match:
-        method = match.group(1).strip()     # 'atomic' o 'reduction'
-        dtype = match.group(2).strip()      # 'int', 'float', 'double', 'long long int'
-        is_opt = match.group(3)             # 'true', 'false' o None
-        size = int(match.group(4))
-        stat_type = match.group(5)
-        
-        if method == 'atomic':
-            algo = 'Atomic'
-        elif method == 'reduction':
-            algo = 'Reduction_Opt' if is_opt == 'true' else 'Reduction_Standard'
+    m = BENCHMARK_NAME_RE.match(name)
+    if not m:
+        return None
+ 
+    algo_base = m.group("algo")
+    template_args = [a.strip() for a in m.group("template_args").split(",")]
+    size = int(m.group("size"))
+    agg = m.group("agg")
+ 
+    dtype = template_args[0]
+ 
+    if algo_base == "atomic":
+        label = "Atomic"
+    elif algo_base == "thrust":
+        label = "Thrust"
+    elif algo_base == "reduction":
+        # Second template argument is the "optimized" boolean flag.
+        if len(template_args) < 2:
+            return None
+        flag = template_args[1].lower()
+        if flag == "true":
+            label = "Reduction_opt"
+        elif flag == "false":
+            label = "Reduction"
         else:
-            algo = method
-
-        return algo, dtype, size, stat_type
-
-    return None, None, None, None
-
-def apply_dense_grid(ax):
-    """
-    Configura el eje X logarítmico para mostrar marcas intermedias
-    y activa una cuadrícula (grid) densa.
-    """
-    ax.set_xscale('log')
-    ax.xaxis.set_minor_locator(ticker.LogLocator(base=10.0, subs=(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9), numticks=12))
-    ax.xaxis.set_minor_formatter(ticker.NullFormatter())
-    
-    ax.grid(True, which="major", linestyle="-", alpha=0.6, color='#888888')
-    ax.grid(True, which="minor", linestyle=":", alpha=0.4, color='#aaaaaa')
-
-def plot_benchmarks(input_json, output_dir):
-    if not os.path.exists(input_json) or os.path.getsize(input_json) == 0:
-        print(f"Error: File {input_json} is empty or does not exist.")
-        return
-
-    subdirs = {
-        'time': os.path.join(output_dir, 'time'),
-        'bandwidth': os.path.join(output_dir, 'bandwidth'),
-        'memory_usage': os.path.join(output_dir, 'memory_usage'),
-        'speedup': os.path.join(output_dir, 'speedup'),
-        'dashboard': os.path.join(output_dir, 'dashboard')
-    }
-
-    for path in subdirs.values():
-        os.makedirs(path, exist_ok=True)
-
-    with open(input_json, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    if "benchmarks" not in data:
-        print("Error: Key 'benchmarks' not found in JSON file.")
-        return
-
-    df = pd.DataFrame(data["benchmarks"])
-
-    parsed_data = df['name'].apply(parse_benchmark_name)
-    df['algo'] = [p[0] for p in parsed_data]
-    df['dtype'] = [p[1] for p in parsed_data]
-    df['size'] = [p[2] for p in parsed_data]
-    df['stat_type'] = [p[3] for p in parsed_data]
-    
-    df = df.dropna(subset=['algo', 'dtype', 'size'])
-    
-    if df.empty:
-        print("Error: No valid benchmarks found in JSON.")
-        return
-
-    df['real_time_ms'] = pd.to_numeric(df['real_time'], errors='coerce')
-
-    # Tamaño de los tipos de datos en Bytes
-    type_sizes = {'int': 4, 'float': 4, 'double': 8, 'long long int': 8, 'long long': 8}
-    df['bytes_per_elem'] = df['dtype'].map(type_sizes).fillna(4)
-
-    # Ancho de banda calculado estrictamente desde el tiempo medido en ms
-    df['gb_per_sec'] = (df['size'] * df['bytes_per_elem']) / (df['real_time_ms'] * 1e6)
-
-    # Lectura del contador de memoria nativo de C++
-    if 'Memory_MB' in df.columns:
-        df['memory_used_mb'] = pd.to_numeric(df['Memory_MB'], errors='coerce')
+            return None
     else:
-        df['memory_used_mb'] = 0.0
-
-    colors = {
-        'Atomic': '#e74c3c',             # Rojo
-        'Reduction_Standard': '#3498db', # Azul
-        'Reduction_Opt': '#2ecc71'       # Verde
-    }
-
-    dtypes = df['dtype'].unique()
-
-    for dtype in dtypes:
-        df_mean = df[(df['dtype'] == dtype) & (df['stat_type'] == 'mean')]
-        df_std = df[(df['dtype'] == dtype) & (df['stat_type'] == 'stddev')]
-        
-        if df_mean.empty:
+        return None
+ 
+    return label, dtype, size, agg
+ 
+ 
+def load_benchmark_data(input_path):
+    """
+    Loads the Google Benchmark JSON file and returns a nested dict:
+ 
+        data[dtype_cpp][algo_label] = AlgoSeries(...)
+ 
+    where dtype_cpp is the C++ type spelling ("int", "long long int",
+    "float", "double") and algo_label is one of
+    "Atomic", "Reduction", "Reduction_opt", "Thrust".
+    """
+    with open(input_path, "r") as f:
+        raw = json.load(f)
+ 
+    benchmarks = raw.get("benchmarks", [])
+ 
+    # Intermediate storage keyed by (dtype, algo, size) -> {"mean": ..., "stddev": ..., "memory": ...}
+    points = {}
+ 
+    for b in benchmarks:
+        classification = classify_benchmark(b.get("name", ""))
+        if classification is None:
             continue
-
-        safe_dtype_name = dtype.replace(' ', '_')
-
-        # ----------------------------------------------------
-        # 1. TIEMPO DE EJECUCIÓN CON SOMBRA DE STDDEV (ms)
-        # ----------------------------------------------------
-        fig, ax = plt.subplots(figsize=(9, 6))
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            df_algo_std = df_std[df_std['algo'] == algo].sort_values('size')
-
-            color = colors.get(algo, '#7f8c8d')
-            ax.plot(df_algo_mean['size'], df_algo_mean['real_time_ms'], marker='o', linewidth=2, color=color, label=algo)
-
-            if not df_algo_std.empty:
-                merged = pd.merge(df_algo_mean, df_algo_std, on='size', suffixes=('_mean', '_std'))
-                y_mean = merged['real_time_ms_mean']
-                y_std = merged['real_time_ms_std']
-
-                # Sombra mostrando Media ± Desviación Típica
-                ax.fill_between(merged['size'], 
-                                (y_mean - y_std).clip(lower=1e-6), 
-                                y_mean + y_std, 
-                                color=color, alpha=0.2)
-
-        ax.set_yscale('log')
-        apply_dense_grid(ax)
-        ax.set_xlabel('Number of elements ($N$)', fontsize=12)
-        ax.set_ylabel('Execution Time (ms) [Log Scale]', fontsize=12)
-        ax.set_title(f'Execution Time (Mean ± StdDev) - {dtype}', fontsize=14, fontweight='bold')
-        ax.legend(loc='upper left', fontsize=11)
-        plt.tight_layout()
-        plt.savefig(os.path.join(subdirs['time'], f'time_{safe_dtype_name}.png'), dpi=300)
-        plt.close()
-
-        # ----------------------------------------------------
-        # 2. ANCHO DE BANDA EFECTIVO CON SOMBRA (GB/s)
-        # ----------------------------------------------------
-        fig, ax = plt.subplots(figsize=(9, 6))
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            df_algo_std = df_std[df_std['algo'] == algo].sort_values('size')
-
-            color = colors.get(algo, '#7f8c8d')
-            ax.plot(df_algo_mean['size'], df_algo_mean['gb_per_sec'], marker='s', linewidth=2, color=color, label=algo)
-
-            if not df_algo_std.empty:
-                merged = pd.merge(df_algo_mean, df_algo_std, on='size', suffixes=('_mean', '_std'))
-                t_mean = merged['real_time_ms_mean']
-                t_std = merged['real_time_ms_std']
-                bytes_total = merged['size'] * merged['bytes_per_elem_mean']
-
-                # Propagación de incertidumbre para el Ancho de Banda
-                bw_max = (bytes_total) / ((t_mean - t_std).clip(lower=1e-6) * 1e6)
-                bw_min = (bytes_total) / ((t_mean + t_std) * 1e6)
-
-                ax.fill_between(merged['size'], bw_min, bw_max, color=color, alpha=0.2)
-
-        apply_dense_grid(ax)
-        ax.set_xlabel('Number of elements ($N$)', fontsize=12)
-        ax.set_ylabel('Effective Bandwidth (GB/s)', fontsize=12)
-        ax.set_title(f'Bandwidth Efficiency (Mean ± StdDev) - {dtype}', fontsize=14, fontweight='bold')
-        ax.legend(loc='upper left', fontsize=11)
-        plt.tight_layout()
-        plt.savefig(os.path.join(subdirs['bandwidth'], f'bandwidth_{safe_dtype_name}.png'), dpi=300)
-        plt.close()
-
-        # ----------------------------------------------------
-        # 3. MEMORIA MEDIDA DESDE C++ (MB)
-        # ----------------------------------------------------
-        fig, ax = plt.subplots(figsize=(9, 6))
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            color = colors.get(algo, '#7f8c8d')
-            linestyle = '--' if algo == 'Reduction_Opt' else '-'
-            
-            ax.plot(df_algo_mean['size'], df_algo_mean['memory_used_mb'], marker='d', 
-                    linewidth=2.5, linestyle=linestyle, alpha=0.8, color=color, label=algo)
-
-        ax.set_yscale('log')
-        apply_dense_grid(ax)
-        ax.set_xlabel('Number of elements ($N$)', fontsize=12)
-        ax.set_ylabel('Peak VRAM Memory Usage (MB) [Log Scale]', fontsize=12)
-        ax.set_title(f'Measured Memory Usage (NVML Peak VRAM) - {dtype}', fontsize=14, fontweight='bold')
-        ax.legend(loc='upper left', fontsize=11)
-        plt.tight_layout()
-        plt.savefig(os.path.join(subdirs['memory_usage'], f'memory_{safe_dtype_name}.png'), dpi=300)
-        plt.close()
-
-        # ----------------------------------------------------
-        # 4. SPEEDUP RESPECTO A ATOMIC
-        # ----------------------------------------------------
-        df_atomic_mean = df_mean[df_mean['algo'] == 'Atomic'].sort_values('size')
-        if not df_atomic_mean.empty:
-            fig, ax = plt.subplots(figsize=(9, 6))
-            atomic_times = df_atomic_mean.set_index('size')['real_time_ms']
-
-            for algo in sorted(df_mean['algo'].unique()):
-                if algo == 'Atomic':
-                    continue
-                df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-                merged = df_algo_mean.set_index('size')['real_time_ms'].to_frame('algo_time').join(atomic_times.to_frame('atomic_time'))
-                speedup = merged['atomic_time'] / merged['algo_time']
-
-                color = colors.get(algo, '#7f8c8d')
-                ax.plot(speedup.index, speedup.values, marker='^', linewidth=2, color=color, label=f'Speedup {algo} vs Atomic')
-
-            ax.axhline(y=1.0, color='black', linestyle=':', label='Baseline (Atomic)')
-            apply_dense_grid(ax)
-            ax.set_xlabel('Number of elements ($N$)', fontsize=12)
-            ax.set_ylabel('Speedup Factor ($X$ times faster)', fontsize=12)
-            ax.set_title(f'Speedup relative to Atomic - {dtype}', fontsize=14, fontweight='bold')
-            ax.legend(loc='upper left', fontsize=11)
-            plt.tight_layout()
-            plt.savefig(os.path.join(subdirs['speedup'], f'speedup_{safe_dtype_name}.png'), dpi=300)
-            plt.close()
-
-        # ----------------------------------------------------
-        # 5. DASHBOARD GENERAL (2x2) CON SOMBRAS
-        # ----------------------------------------------------
-        fig, axs = plt.subplots(2, 2, figsize=(15, 10))
-        fig.suptitle(f'Comprehensive Benchmark Analysis - Data Type: {dtype}', fontsize=16, fontweight='bold')
-
-        # Subplot 1: TIEMPO
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            df_algo_std = df_std[df_std['algo'] == algo].sort_values('size')
-            color = colors.get(algo)
-
-            axs[0, 0].plot(df_algo_mean['size'], df_algo_mean['real_time_ms'], marker='o', color=color, label=algo)
-            if not df_algo_std.empty:
-                merged = pd.merge(df_algo_mean, df_algo_std, on='size', suffixes=('_mean', '_std'))
-                axs[0, 0].fill_between(merged['size'], 
-                                       (merged['real_time_ms_mean'] - merged['real_time_ms_std']).clip(lower=1e-6), 
-                                       merged['real_time_ms_mean'] + merged['real_time_ms_std'], 
-                                       color=color, alpha=0.2)
-        axs[0, 0].set_yscale('log')
-        apply_dense_grid(axs[0, 0])
-        axs[0, 0].set_title('Execution Time (ms) ± StdDev [Log-Log]')
-        axs[0, 0].set_ylabel('Time (ms)')
-        axs[0, 0].legend()
-
-        # Subplot 2: ANCHO DE BANDA
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            df_algo_std = df_std[df_std['algo'] == algo].sort_values('size')
-            color = colors.get(algo)
-
-            axs[0, 1].plot(df_algo_mean['size'], df_algo_mean['gb_per_sec'], marker='s', color=color, label=algo)
-            if not df_algo_std.empty:
-                merged = pd.merge(df_algo_mean, df_algo_std, on='size', suffixes=('_mean', '_std'))
-                t_m = merged['real_time_ms_mean']
-                t_s = merged['real_time_ms_std']
-                bytes_tot = merged['size'] * merged['bytes_per_elem_mean']
-                axs[0, 1].fill_between(merged['size'], 
-                                       bytes_tot / ((t_m + t_s) * 1e6), 
-                                       bytes_tot / ((t_m - t_s).clip(lower=1e-6) * 1e6), 
-                                       color=color, alpha=0.2)
-        apply_dense_grid(axs[0, 1])
-        axs[0, 1].set_title('Effective Bandwidth (GB/s) ± StdDev')
-        axs[0, 1].set_ylabel('GB/s')
-        axs[0, 1].legend()
-
-        # Subplot 3: SPEEDUP
-        if not df_atomic_mean.empty:
-            for algo in sorted(df_mean['algo'].unique()):
-                if algo == 'Atomic': continue
-                df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-                merged = df_algo_mean.set_index('size')['real_time_ms'].to_frame('algo_time').join(atomic_times.to_frame('atomic_time'))
-                speedup = merged['atomic_time'] / merged['algo_time']
-                axs[1, 0].plot(speedup.index, speedup.values, marker='^', color=colors.get(algo), label=f'{algo} vs Atomic')
-            axs[1, 0].axhline(y=1.0, color='black', linestyle=':')
-            apply_dense_grid(axs[1, 0])
-            axs[1, 0].set_title('Speedup vs Atomic Baseline')
-            axs[1, 0].set_ylabel('Speedup Factor')
-            axs[1, 0].legend()
-
-        # Subplot 4: MEMORIA
-        for algo in sorted(df_mean['algo'].unique()):
-            df_algo_mean = df_mean[df_mean['algo'] == algo].sort_values('size')
-            linestyle = '--' if algo == 'Reduction_Opt' else '-'
-            axs[1, 1].plot(df_algo_mean['size'], df_algo_mean['memory_used_mb'], marker='d', 
-                           linestyle=linestyle, alpha=0.8, color=colors.get(algo), label=algo)
-        axs[1, 1].set_yscale('log')
-        apply_dense_grid(axs[1, 1])
-        axs[1, 1].set_title('Measured Memory Usage (MB) [Log Scale]')
-        axs[1, 1].set_ylabel('Memory (MB)')
-        axs[1, 1].legend()
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(subdirs['dashboard'], f'dashboard_{safe_dtype_name}.png'), dpi=300)
-        plt.close()
-
-        print(f" -> Generated plots with StdDev bands and recalculated bandwidth for: {dtype}")
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process Google Benchmark JSON results.')
-    parser.add_argument('--input', required=True, help='Path to input JSON file')
-    parser.add_argument('--output-dir', default='./plots', help='Root directory to store structured PNGs')
+        label, dtype, size, agg = classification
+ 
+        time_unit = b.get("time_unit", "ms")
+        unit_factor = TIME_UNIT_TO_SECONDS.get(time_unit, 1e-3)
+        real_time_s = b.get("real_time", 0.0) * unit_factor
+ 
+        key = (dtype, label, size)
+        entry = points.setdefault(key, {"mean": None, "stddev": None, "memory": None})
+ 
+        if agg == "mean":
+            entry["mean"] = real_time_s
+            entry["memory"] = b.get("Memory_MB", 0.0)
+        elif agg == "stddev":
+            entry["stddev"] = real_time_s
+ 
+    # Reshape into data[dtype][algo] = AlgoSeries
+    data = {}
+    for (dtype, label, size), entry in points.items():
+        if entry["mean"] is None:
+            # No mean aggregate found for this point; skip incomplete entries.
+            continue
+        data.setdefault(dtype, {}).setdefault(label, AlgoSeries())
+        series = data[dtype][label]
+        series.sizes.append(size)
+        series.mean_time_s.append(entry["mean"])
+        series.stddev_time_s.append(entry["stddev"] if entry["stddev"] is not None else 0.0)
+        series.memory_mb.append(entry["memory"] if entry["memory"] is not None else 0.0)
+ 
+    # Sort every series by number of elements ascending.
+    for dtype, algos in data.items():
+        for label, series in algos.items():
+            order = sorted(range(len(series.sizes)), key=lambda i: series.sizes[i])
+            series.sizes = [series.sizes[i] for i in order]
+            series.mean_time_s = [series.mean_time_s[i] for i in order]
+            series.stddev_time_s = [series.stddev_time_s[i] for i in order]
+            series.memory_mb = [series.memory_mb[i] for i in order]
+ 
+    return data
+ 
+ 
+# --------------------------------------------------------------------------
+# Plot helpers
+# --------------------------------------------------------------------------
+ 
+def style_axes(ax, xlabel="Number of elements", ylabel="", title=""):
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.set_xscale("log")
+    ax.grid(True, which="both", linestyle="--", alpha=0.4)
+    ax.legend()
+ 
+ 
+def draw_time(ax, algos, dtype_label):
+    for algo in ALGO_ORDER:
+        series = algos.get(algo)
+        if series is None or not series.sizes:
+            continue
+        x = series.sizes
+        y_ms = [t * 1e3 for t in series.mean_time_s]
+        color = ALGO_COLORS[algo]
+        ax.plot(x, y_ms, label=algo, color=color, marker="o", linewidth=1.8, markersize=4)
+ 
+    ax.set_yscale("log")
+    style_axes(ax, ylabel="Real time (ms)", title=f"Execution time — {dtype_label}")
+ 
+ 
+def draw_memory(ax, algos, dtype_label):
+    for algo in ALGO_ORDER:
+        series = algos.get(algo)
+        if series is None or not series.sizes:
+            continue
+        color = ALGO_COLORS[algo]
+        ax.plot(series.sizes, series.memory_mb, label=algo, color=color, marker="o",
+                 linewidth=1.8, markersize=4)
+ 
+    style_axes(ax, ylabel="Memory usage (MB)", title=f"Memory usage — {dtype_label}")
+ 
+ 
+def draw_speedup(ax, algos, dtype_label):
+    atomic = algos.get("Atomic")
+    if atomic is None or not atomic.sizes:
+        ax.set_title(f"Speedup — {dtype_label} (no Atomic baseline found)")
+        return
+ 
+    atomic_by_size = dict(zip(atomic.sizes, atomic.mean_time_s))
+ 
+    # Reference line for Atomic itself (speedup == 1).
+    all_sizes = sorted(atomic_by_size.keys())
+    ax.plot(all_sizes, [1.0] * len(all_sizes), linestyle="--", color=ALGO_COLORS["Atomic"],
+             label="Atomic (baseline)", linewidth=1.5)
+ 
+    for algo in ["Reduction", "Reduction_opt", "Thrust"]:
+        series = algos.get(algo)
+        if series is None or not series.sizes:
+            continue
+        color = ALGO_COLORS[algo]
+        xs, ys = [], []
+        for size, t in zip(series.sizes, series.mean_time_s):
+            if size in atomic_by_size and t > 0:
+                xs.append(size)
+                ys.append(atomic_by_size[size] / t)
+        if xs:
+            ax.plot(xs, ys, label=algo, color=color, marker="o", linewidth=1.8, markersize=4)
+ 
+    style_axes(ax, ylabel="Speedup vs Atomic (x)", title=f"Speedup — {dtype_label}")
+ 
+ 
+def draw_bandwidth(ax, algos, dtype_label, dtype_cpp):
+    elem_bytes = DTYPE_SIZE_BYTES[dtype_cpp]
+    for algo in ALGO_ORDER:
+        series = algos.get(algo)
+        if series is None or not series.sizes:
+            continue
+        color = ALGO_COLORS[algo]
+        xs, ys = [], []
+        for size, t in zip(series.sizes, series.mean_time_s):
+            if t > 0:
+                bytes_per_sec = (size * elem_bytes) / t
+                xs.append(size)
+                ys.append(bytes_per_sec / 1e9)  # GB/s
+        if xs:
+            ax.plot(xs, ys, label=algo, color=color, marker="o", linewidth=1.8, markersize=4)
+ 
+    style_axes(ax, ylabel="Bandwidth (GB/s)", title=f"Bandwidth — {dtype_label}")
+ 
+ 
+# --------------------------------------------------------------------------
+# Figure builders (one figure per plot type / dtype)
+# --------------------------------------------------------------------------
+ 
+def save_fig(fig, out_dir, filename):
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, filename)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {path}")
+ 
+ 
+def make_time_plot(algos, dtype_cpp, dtype_key, dtype_label, output_dir):
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    draw_time(ax, algos, dtype_label)
+    save_fig(fig, os.path.join(output_dir, "time"), f"time_{dtype_key}.png")
+ 
+ 
+def make_memory_plot(algos, dtype_cpp, dtype_key, dtype_label, output_dir):
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    draw_memory(ax, algos, dtype_label)
+    save_fig(fig, os.path.join(output_dir, "memory_usage"), f"memory_usage_{dtype_key}.png")
+ 
+ 
+def make_speedup_plot(algos, dtype_cpp, dtype_key, dtype_label, output_dir):
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    draw_speedup(ax, algos, dtype_label)
+    save_fig(fig, os.path.join(output_dir, "speedup"), f"speedup_{dtype_key}.png")
+ 
+ 
+def make_bandwidth_plot(algos, dtype_cpp, dtype_key, dtype_label, output_dir):
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    draw_bandwidth(ax, algos, dtype_label, dtype_cpp)
+    save_fig(fig, os.path.join(output_dir, "bandwidth"), f"bandwidth_{dtype_key}.png")
+ 
+ 
+def make_dashboard_plot(algos, dtype_cpp, dtype_key, dtype_label, output_dir):
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    draw_time(axes[0, 0], algos, dtype_label)
+    draw_memory(axes[0, 1], algos, dtype_label)
+    draw_speedup(axes[1, 0], algos, dtype_label)
+    draw_bandwidth(axes[1, 1], algos, dtype_label, dtype_cpp)
+    fig.suptitle(f"Benchmark dashboard — {dtype_label}", fontsize=16)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    save_fig(fig, os.path.join(output_dir, "dashboard"), f"dashboard_{dtype_key}.png")
+ 
+ 
+# --------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------
+ 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate benchmark plots (time, memory, speedup, bandwidth, dashboard) "
+                     "from a Google Benchmark JSON results file."
+    )
+    parser.add_argument("--input", required=False, default="./build/benchmarks/benchmarks_results.csv", help="Path to the input JSON file")
+    parser.add_argument("--output-dir", required=False, default="./plots", help="Directory where plots will be written")
     args = parser.parse_args()
-    
-    plot_benchmarks(args.input, args.output_dir)
+ 
+    if not os.path.isfile(args.input):
+        print(f"Error: input file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+ 
+    print(f"Loading benchmark data from {args.input} ...")
+    data = load_benchmark_data(args.input)
+ 
+    if not data:
+        print("Error: no recognizable benchmark entries found in the input file.", file=sys.stderr)
+        sys.exit(1)
+ 
+    plt.rcParams.update({"font.size": 10})
+ 
+    for dtype_cpp, dtype_key, dtype_label in DTYPES:
+        algos = data.get(dtype_cpp)
+        if not algos:
+            print(f"Warning: no data found for data type '{dtype_cpp}', skipping.", file=sys.stderr)
+            continue
+ 
+        print(f"Generating plots for data type: {dtype_label}")
+        make_time_plot(algos, dtype_cpp, dtype_key, dtype_label, args.output_dir)
+        make_memory_plot(algos, dtype_cpp, dtype_key, dtype_label, args.output_dir)
+        make_speedup_plot(algos, dtype_cpp, dtype_key, dtype_label, args.output_dir)
+        make_bandwidth_plot(algos, dtype_cpp, dtype_key, dtype_label, args.output_dir)
+        make_dashboard_plot(algos, dtype_cpp, dtype_key, dtype_label, args.output_dir)
+ 
+    print("Done.")
+ 
+ 
+if __name__ == "__main__":
+    main()

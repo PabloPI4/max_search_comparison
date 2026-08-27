@@ -117,10 +117,8 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
         Not executed by leftover threads.
     */
     if (index_thread <= last_thread) {
-        element = array[position_access];
+        maximum = array[position_access];
     }
-
-    maximum = element;
 
     position_access += (last_thread + 1) * offset;
 
@@ -153,8 +151,8 @@ __global__ void reduction_max_gpu(T *array, unsigned long long int offset,
         have less than 32 threads.
     */
     if (index_thread >= last_thread - last_thread_pos_warp && last_thread_pos_warp != 31) {
-        mask = (1 << (last_thread_pos_warp + 1)) - 1;
         jump = last_thread_pos_warp >> 1;
+        mask = (1 << (last_thread_pos_warp + 1)) - 1;
     }
 
     /*
@@ -263,10 +261,8 @@ __global__ void reduction_max_gpu_opt(T *array, T *array_out, unsigned long long
         Not executed by leftover threads.
     */
     if (index_thread <= last_thread) {
-        element = array[position_access];
+        maximum = array[position_access];
     }
-
-    maximum = element;
 
     position_access += last_thread + 1;
 
