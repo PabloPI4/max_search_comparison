@@ -4,6 +4,7 @@ project(max_search_comparison LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_ARCHITECTURES 86)
 
 add_subdirectory(src)
 add_subdirectory(tests)

@@ -182,7 +182,7 @@ void benchmark_max_search_thrust(benchmark::State& state) {
 BENCHMARK_TEMPLATE(benchmark_max_search_atomic, int)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -191,7 +191,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_atomic, int)
 BENCHMARK_TEMPLATE(benchmark_max_search_atomic, long long int)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -200,7 +200,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_atomic, long long int)
 BENCHMARK_TEMPLATE(benchmark_max_search_atomic, float)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -209,7 +209,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_atomic, float)
 BENCHMARK_TEMPLATE(benchmark_max_search_atomic, double)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -220,7 +220,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_atomic, double)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, int, false)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -229,7 +229,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, int, false)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, long long int, false)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -238,7 +238,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, long long int, false)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, float, false)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -247,7 +247,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, float, false)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, double, false)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -258,7 +258,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, double, false)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, int, true)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -267,7 +267,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, int, true)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, long long int, true)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -276,7 +276,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, long long int, true)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, float, true)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -285,7 +285,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, float, true)
 BENCHMARK_TEMPLATE(benchmark_max_search_reduction, double, true)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -296,7 +296,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_reduction, double, true)
 BENCHMARK_TEMPLATE(benchmark_max_search_thrust, int)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -305,7 +305,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_thrust, int)
 BENCHMARK_TEMPLATE(benchmark_max_search_thrust, long long int)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -314,7 +314,7 @@ BENCHMARK_TEMPLATE(benchmark_max_search_thrust, long long int)
 BENCHMARK_TEMPLATE(benchmark_max_search_thrust, float)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
 
@@ -323,6 +323,6 @@ BENCHMARK_TEMPLATE(benchmark_max_search_thrust, float)
 BENCHMARK_TEMPLATE(benchmark_max_search_thrust, double)
     ->RangeMultiplier(10)->Range(1000, 100000000)
     ->MinTime(0.5)
-    ->Repetitions(3)
+    ->Repetitions(10)
     ->DisplayAggregatesOnly(true)
     ->Unit(benchmark::kMillisecond);
